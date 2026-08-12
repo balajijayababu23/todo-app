@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:3001/api/tasks';
+const API_URL = `http://${window.location.hostname}:3001/api/tasks`;
 
 const form = document.getElementById('task-form');
 const input = document.getElementById('task-input');
