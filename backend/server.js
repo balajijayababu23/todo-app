@@ -1,8 +1,7 @@
-// Simple Todo API backend
-// Stores tasks in memory for now (Week 3 will move this to PostgreSQL)
-
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const pool = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -10,50 +9,67 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// In-memory "database" — just an array for now
-let tasks = [
-  { id: 1, title: 'Learn Docker', done: false },
-  { id: 2, title: 'Deploy to AWS', done: false }
-];
-let nextId = 3;
-
-// GET /api/tasks -> list all tasks
-app.get('/api/tasks', (req, res) => {
-  res.json(tasks);
+app.get('/api/tasks', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM tasks ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-// POST /api/tasks -> create a new task
-app.post('/api/tasks', (req, res) => {
+app.post('/api/tasks', async (req, res) => {
   const { title } = req.body;
   if (!title || !title.trim()) {
     return res.status(400).json({ error: 'Title is required' });
   }
-  const newTask = { id: nextId++, title: title.trim(), done: false };
-  tasks.push(newTask);
-  res.status(201).json(newTask);
+  try {
+    const result = await pool.query(
+      'INSERT INTO tasks (title, done) VALUES ($1, false) RETURNING *',
+      [title.trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-// PUT /api/tasks/:id -> toggle done / update a task
-app.put('/api/tasks/:id', (req, res) => {
+app.put('/api/tasks/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const task = tasks.find(t => t.id === id);
-  if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
+  const { done, title } = req.body;
+  try {
+    const existing = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    const updatedDone = typeof done === 'boolean' ? done : existing.rows[0].done;
+    const updatedTitle = typeof title === 'string' ? title : existing.rows[0].title;
+
+    const result = await pool.query(
+      'UPDATE tasks SET done = $1, title = $2 WHERE id = $3 RETURNING *',
+      [updatedDone, updatedTitle, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
   }
-  if (typeof req.body.done === 'boolean') task.done = req.body.done;
-  if (typeof req.body.title === 'string') task.title = req.body.title;
-  res.json(task);
 });
 
-// DELETE /api/tasks/:id -> remove a task
-app.delete('/api/tasks/:id', (req, res) => {
+app.delete('/api/tasks/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const before = tasks.length;
-  tasks = tasks.filter(t => t.id !== id);
-  if (tasks.length === before) {
-    return res.status(404).json({ error: 'Task not found' });
+  try {
+    const result = await pool.query('DELETE FROM tasks WHERE id = $1 RETURNING *', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
   }
-  res.status(204).send();
 });
 
 app.get('/api/health', (req, res) => {
